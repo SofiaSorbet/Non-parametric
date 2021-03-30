@@ -1,6 +1,6 @@
 ---
 title: "Problem Set of Non-parametric Statistics"
-author: "Arturo Prieto Tirado, Sofía Sorbet Santiago"
+author: "Arturo Prieto Tirado and Sofía Sorbet Santiago"
 date: "24/3/2021"
 output: pdf_document
 ---
