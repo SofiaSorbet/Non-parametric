@@ -2,13 +2,12 @@
 title: "Problem Set of Non-parametric Statistics"
 author: "Arturo Prieto Tirado, Sofía Sorbet Santiago"
 date: "24/3/2021"
-output: html_document
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message=FALSE)
-
-pacman::p_load(rotasym, ks, matlib)
+pacman::p_load(rotasym, ks, matlib, rootSolve)
 ```
 
 ## Problem A.2
@@ -16,6 +15,7 @@ pacman::p_load(rotasym, ks, matlib)
 The data(sunspots_births, package = "rotasym") dataset contains the recorded sunspots births during 1872–2018 from the Debrecen Photoheliographic Data (DPD) catalogue. The dataset presents 51303 sunspot records, featuring their positions in spherical coordinates (theta and phi), sizes (total_area), and distances to the center of the solar disk (dist_sun_disc).
 
 ```{r}
+# Load the dataset
 data(sunspots_births, package = "rotasym") 
 ```
 
@@ -23,59 +23,93 @@ data(sunspots_births, package = "rotasym")
 
 - a. Compute and plot the kde for phi using the DPI selector. Describe the result.
 
-```{r}
-# The default h is the one obtained using DPI selector which can also be obtained by ks::hpi
-sunspots_phi = sunspots_births$phi
-kde_phi <- ks::kde(x = sunspots_phi)
+Estimating the kde for phi can be done with ks::kde, that uses the DPI selector by default. The obtained kde is shown in the following figure.
 
+```{r}
+# Covariate of interest: phi
+sunspots_phi = sunspots_births$phi
+
+# The default h is the one obtained using DPI selector which can also be obtained by ks::hpi
+kde_phi = ks::kde(x = sunspots_phi)
+
+# Plotting the kde of phi
 plot(kde_phi, lwd = 3, xlab = "Phi")
 
 ```
 
-It can be seen that the distribution is symmetric around the equator ($\phi=0$) with two distinct modes. Furthermore, it is interesting to see that most of the sunspots are located in intermediate latitudes, with low density in the equator and almost none in the poles. The absence in the poles might also be explained taking into account that sunspots are measured by looking right at the sun from the front, which implies projecting the sphere into the plane to take an image of the sun and locate the sunspots. This process distorts the original distribution with bigger importance at the poles. Also, since the sun rotates only on theta, it is not expected that a given sunspot changes latitude a lot.
+It can be seen that the distribution is symmetric around the equator ($\phi=0$) with two distinct modes. Furthermore, it is interesting to see that most of the sunspots are located in intermediate latitudes, with low density in the equator and almost none in the poles. The absence in the poles might also be explained taking into account that sunspots are measured by looking right at the sun from the front, which implies projecting the sphere into the plane to take an image of the sun and locate the sunspots. This process distorts the original distribution with bigger importance at the poles, so any measurement there is very difficult apart from other physical phenomena that might explain sunspots evolution. Also, since the sun rotates only on theta, it is not expected that a given sunspot changes the latitude where it originated by much.
 
 - b. Compute and plot the kernel density derivative estimator for phi using the adequate DPI selector. Determine approximately the location of the main mode(s).
 
-```{r}
-#the kdde determines the density derivative of order deriv.order (0 is also the density)
-#using the DPI bandwidth adequate for that derivative order. Remember that higher order derivatives need bigger bandwidths
-kde_derivative_phi <- ks::kdde(x = sunspots_phi, deriv.order = 1)
-est = kde_derivative_phi$estimate
-evpoints = kde_derivative_phi$eval.points
+Computing density derivatives estimation usually requires bigger bandwidths than computing kde. The function ks:kdde implements density derivative estimation with the DPI as default bandwidth selector. Plugging deriv.order = 1 uses the adequate DPI selector for density derivative estimation. Finally, one can look for the approximate modes by looking at the points where the derivative equals zero. It is known from part a) that we should be expecting three of those points, the two maxima (modes) and the minimum of the valley at phi=0. The distribution of the kdde is shown in the following figure.
 
+```{r}
+# The kdde determines the density derivative of order deriv.order (0 is also the density)
+# using the DPI bandwidth adequate for that derivative order. 
+# (remember that higher order derivatives need bigger bandwidths)
+kde_derivative_phi = ks::kdde(x = sunspots_phi, deriv.order = 1)
+est = kde_derivative_phi$estimate 
+evpoints = kde_derivative_phi$eval.points 
+
+# Plot the kdde
 plot(kde_derivative_phi, lwd = 3, xlab = "Phi")
 
-abline(v = evpoints[which(est==max(est))], col = "red")
-abline(v = evpoints[which(est==min(est))], col = "red")
+```
 
-print(c(evpoints[which(est==min(est))],evpoints[which(est==max(est))]))
+It can be seen that there are in fact 3 relative extremes, as expected. To find them, we look for the zeros of the kdde using uniroot.all in the interval (-0.5, 0.5) to avoid the spurious zeros in low density regions. The zeros found by uniroot are -0.23, -0.0027, 0.21 corresponding to the first mode, the valley at phi = 0 and the second mode.
 
+
+```{r}
+# Function that calculates the kdde for phi at a given point
+# @params x vector of evaluation points
+# @return The value of the kdde at x
+solvekde = function(x){
+  kde_derivative_phi = ks::kdde(x = sunspots_phi, deriv.order = 1, eval.points = x)
+  return(kde_derivative_phi$estimate)
+}
+
+# Find the relative extremes using uniroot.all in interval (-0.5, 0.5)
+relativeextremes = uniroot.all(solvekde, lower = -0.5, upper = 0.5)
 ```
 
 
 - c. Compute the log-transformed kde with adj.positive = 1 for total_area using the NS selector.
 
-REVISAR
+The problem with normal kdes is that they span all the points from $-\infty$ to $+\infty$. However, the total area of the sunspot is clearly a positive variable. In order to handle this kind of variables one can transform them taking the logarithm to go from the support (0, $\infty$) to $(-\infty,+\infty)$. Then, estimate the kde and transform it back to the original positive support. Keeping in mind the general rule for a change of variable mapping of the density:
+$$
+f(x)=g(t(x))t'(x)
+$$
+where $f$ is the non-real-supported density that is mapped into a real-supported density $g$, by means of a transformation $t$. By adding adj.positive = 1 to the function ks::kde implements the log transformed kde internally.
+
+The obtained log transformed kde for area is shown in the following figure. It can be seen that thanks to this procedure, the final support of the kde is only positive areas, as we wanted.
 
 ```{r}
-#take logarithm????
+# Covariate of interest: total_area 
 area = sunspots_births$total_area
 
-#use Normal Scaled bandwidth selector
+# Normal Scaled bandwidth selector
 bw = bw.nrd(x = area)
 
-plot(kde_area <- ks::kde(x = area, h = bw, positive = TRUE, adj.positive = 1), col = "red")
+# Kde for area using previous bw
+kde_area = ks::kde(x = area, h = bw, adj.positive = 1)
 
+# Plotting the kde
+plot(kde_area, col = "red")
 ```
 
-- d. Draw the histogram of M = 10000 samples simulated from the kde obtained in a
+- d. Draw the histogram of M = 10000 samples simulated from the kde obtained in a).
+
+Sampling from a given kde can be done with the function ks::rkde, obtaining the following results when simulating 10000 samples from the phi kde.
 
 ```{r}
-samp_kde <- ks::rkde(n = 1e4, fhat = kde_phi)
-hist(samp_kde)
+# Simulating 10.000 samples from the kde of phi covariate 
+samp_kde = ks::rkde(n = 1e4, fhat = kde_phi)
+
+# Histogram of those samples 
+hist(samp_kde, main="Histogram of phi kde sampling", xlab = "Phi", xlim = c(-1,1))
 ```
 
-Very good reproduction of kde estimate in a).
+It can be seen that the sampling follows the bimodal symmetric shape of kde estimate in a) which seems logical since we have very large sample size.
 
 
 
@@ -86,155 +120,287 @@ Perform the following tasks:
 
 - a. Code your own implementation of the local cubic estimator. The function must take as input the vector of evaluation points x, the sample data, and the bandwidth h. Use the normal kernel. The result must be a vector of the same length as x containing the estimator evaluated at x.
 
+The idea is that, for each desired point, we want to estimate the regression function $m$ in way that minimizes the residual sum of squares.
+$$
+\sum_{i=1}^n(Y_i-\hat{m}(X_i))^2
+$$
+Where $(X_i, Y_i)$ represent the coordinates of the points in the sample.
+
+In order to do that, one first needs a parametrization. This is done doing a local Taylor expansion for $x$ close to $X_i$, in this case, up to order $p=3$ because we want a cubic estimator. 
+$$
+\begin{aligned}
+m\left(X_{i}\right) \approx & m(x)+m^{\prime}(x)\left(X_{i}-x\right)+\frac{m^{\prime \prime}(x)}{2}\left(X_{i}-x\right)^{2}+\frac{m^{(3)}(x)}{3 !}\left(X_{i}-x\right)^{3}
+\end{aligned}
+$$
+Then, plugging the last expression into the population version of RSS we have that
+$$
+\sum_{i=1}^{n}\left(Y_{i}-\sum_{j=0}^{p=3} \frac{m^{(j)}(x)}{j !}\left(X_{i}-x\right)^{j}\right)^{2}
+$$
+This expression is still not workable: it depends on the derivatives of $m$: $m^{(j)}(x), j=0, \ldots, p,$ which are unknown, since $m$ is unknown.
+
+To handle this problem, one sets $\beta_{j}:=\frac{m^{(j)}(x)}{j !}$ and turns the RSS into a linear regression problem where the unknown parameters are precisely $\boldsymbol{\beta}=\left(\beta_{0}, \beta_{1}, \ldots, \beta_{p}\right)^{\prime}$
+Simply rewriting the RSS using this idea gives
+$$
+\sum_{i=1}^{n}\left(Y_{i}-\sum_{j=0}^{p=3} \beta_{j}\left(X_{i}-x\right)^{j}\right)^{2}
+$$
+Now, estimates for $\boldsymbol{\beta}$ automatically produce estimates for $m^{(j)}(x), j=0, \ldots, p .$ In addition, we know how to obtain an estimate $\hat{\boldsymbol{\beta}}$ that minimizes the last expression since this is precisely a least squares problem. The final touch is to weight the contributions of each datum $\left(X_{i}, Y_{i}\right)$ to the estimation of $m(x)$ according to the proximity of $X_{i}$ to $x$ we can achieve this precisely with kernels:
+$$
+\hat{\boldsymbol{\beta}}_{h}:=\arg \min _{\beta \in \mathbb{R}^{p+1}} \sum_{i=1}^{n}\left(Y_{i}-\sum_{j=0}^{p=3} \beta_{j}\left(X_{i}-x\right)^{j}\right)^{2} K_{h}\left(x-X_{i}\right)
+$$
+In order to solve the problem, denote
+$$
+\mathbf{X}:=\left(\begin{array}{cccc}
+1 & X_{1}-x & \left(X_{1}-x\right)^{2} & \left(X_{1}-x\right)^{3} \\
+\vdots & \vdots & \vdots & \vdots \\
+1 & X_{n}-x & \left(X_{n}-x\right)^{2} & \left(X_{n}-x\right)^{3}
+\end{array}\right)_{n \times(4)}
+$$
+and
+$$
+\mathbf{W}:=\operatorname{diag}\left(K_{h}\left(X_{1}-x\right), \ldots, K_{h}\left(X_{n}-x\right)\right), \quad \mathbf{Y}:=\left(\begin{array}{c}
+Y_{1} \\
+\vdots \\
+Y_{n}
+\end{array}\right)_{n \times 1}
+$$
+Then we can re-express it into a weighted least squares problem, which has an exact solution:
+$$
+\begin{aligned}
+\hat{\boldsymbol{\beta}}_{h} &=\arg \min _{\boldsymbol{\beta} \in \mathbb{R}^{p+1}}(\mathbf{Y}-\mathbf{X} \boldsymbol{\beta})^{\prime} \mathbf{W}(\mathbf{Y}-\mathbf{X} \boldsymbol{\beta}) \\
+&=\left(\mathbf{X}^{\prime} \mathbf{W} \mathbf{X}\right)^{-1} \mathbf{X}^{\prime} \mathbf{W} \mathbf{Y}
+\end{aligned}
+$$
+
+And then, the estimate of the regression function $m$, $\hat{m}$ is simply obtained as the first component of the vector of estimated betas.
+
 
 ```{r}
-#Function that determines the cubic estimator for a sample data and returns its
-#value at given points
+# Function that determines the cubic estimator for a sample data and returns its
+# value at given points
 # @params x vector of evaluation points
 # @params data sample data with response and predictors as columns
 # @params h bandwidth
 # @return The cubic estimator from data with bandwidth h evaluated at x
 cubic_estimator = function(x, data, h){
-  Y = data[,2]
-  n=length(Y)
   
-  #define the X matrix for
-  p=3
+  # Initialization of some parameters using the arguments of the function:
+  Y = data[,2] # response variable
+  n=length(Y)  # number of observations 
+  p=3          # order of the polynomial estimator
   
-  #Find the estimated betas (4 since cubic estimator) using the least squares
-  #solution (3.12) and normal kernel for each evaluation point
-  m = rep(0, times = length(x))
+  # Procedure: finding the estimated betas using the least squares
+  # using the solution (3.12) and normal kernel for each evaluation point
+  
+  # Initialization of the estimation of regression function  
+  m = rep(0, times = length(x)) # as many points as evaluation points
+  
+  # Estimation of regression function at each point 
   for(i in 1:length(x)){
-    #define the X matrix for that evaluation point x
-    X = matrix(nrow=n, ncol = p+1)
-    X[,1]=1
+    
+    # Define the X matrix for the evaluation point x[i]
+    X = matrix(nrow=n, ncol = p+1)  # initialization of the X matrix, size (nx(p+1))
+    X[,1]=1                         # first column filled with 1s
     for(j in (2:(p+1))){
-      X[,j]=(data[,1]-x[i])^(j-1)
+      X[,j]=(data[,1]-x[i])^(j-1)   # computing the matrix X
     }
+    
+    # Initialize vector of beta estimates
     beta = rep(0, times = (p+1))
-    #use scaled kernel to use standard normal
+    
+    # Use of both scaled kernel and standard normal
     W = 1/h * diag(dnorm((data[,1]-x[i])/h))
+    
+    # Least squares solution
     beta = solve(t(X) %*% W %*% X) %*% t(X) %*% W %*% Y
-    #recall that beta=(m,m',m'',m''') so:
+    
+    # Recall that beta=(m,m',m'',m''') so:
     m[i] = beta[1]
   }
-  #return estimation of the cubic estimator at x
+  # Return the estimation of the cubic estimator for each x
   return(m)
 }
 ```
 
 - b. Test the implementation by estimating the regression function in the location model $Y = m(X)+\epsilon$ where $m(x) = (x − 1)^2$ , $X \sim N (1, 1)$, and $\epsilon ∼ N (0, 0.5)$. Do it for a sample of size n = 500.
 
+The idea is to simulate $X$ and $Y$ as given in the problem and then use the cubic estimator function to find estimates of $Y$ at any point $x$. In this case, we will find these estimates $\hat{Y}$ at a sequence of points between the minimum and maximum value of $X$ but with many more points than n=500 to enhance accuracy. The results are shown in the following plot, where it can be seen that the local cubic estimator does a great job in estimating the regression function except in low density regions.
+
 ```{r}
-#Simulate Y
-n=500
-X_sim = rnorm(n, mean = 1, sd = 1)
-eps = rnorm(n, mean = 0, sd = 0.5)
-Y_sim = (X_sim-1)^2 + eps
+# Testing the implementation: 
+# estimating the regression function for given X and Y
 
-data=matrix(c(X_sim,Y_sim), nrow=n, ncol=2)
+# Required initializations 
+set.seed(1) # seed for simulation                        
+n=500       # sample size
 
-#optimal bandwidth??
-evaluation_points = seq(min(Y_sim)+0.5, max(Y_sim)-0.5, by=0.1)
+# Simulations 
+X_sim = rnorm(n, mean = 1, sd = 1) # X follows a N(1,1)
+eps = rnorm(n, mean = 0, sd = 0.5) # epsilon follows a N(0, 0.5)
+Y_sim = (X_sim - 1)^2 + eps        # Y = m(x) + epsilon 
 
-Yhat=cubic_estimator(x=evaluation_points, data=data, h=0.2)
+# Parameters for the cubic_estimator function
+data = cbind(X_sim, Y_sim) # matrix of size nx2 with simulated (X, Y)
+evaluation_points = seq(min(X_sim), max(X_sim), by = 0.001) # evaluation points
 
-hist(Yhat)
-hist(Y_sim)
+# Use of cubic_estimator function  
+Yhat = cubic_estimator(x = evaluation_points, data = data, h = 0.5)
+
+# Plotting last results 
+plot(X_sim, Y_sim, main = "Cubic Estimator", xlab = "x", ylab = "y")
+lines(x = evaluation_points, y = Yhat, col = "red")
 ```
-
-
 
 
 ## Problem C.6
 
 Exercise S-III. Consider the context given in Exercise S-I. You want to automatically cluster the two apparent modes in temps-7.txt. To do so, you wish to rely on kernel mean shift clustering. However, it is not implemented in ks::kms for univariate data, so you have to code our own approach.
 
-- a. Implement $\hat{\eta}(x; h) = \frac{h^2 \operatorname{D} \hat{f}(x;h)}{\hat{f}(x;h)}$ as an R function, named eta_hat, that takes as arguments a scalar x, a bandwidth h, and the vector data. It must return the estimated scaled gradient at the point x.
-
 ```{r}
 # Loading the required dataset
 temps7 = read.csv(url("https://raw.githubusercontent.com/egarpor/handy/master/datasets/temps-7.txt"))
 ```
 
-First of all, let's plot the required dataset, in order to obtain information of its support, and shape. In this histogram, it can be seen that there is one main mode around 15, and another local maximum around 40, which means that there may be two clusters of those problematic smartphones. 
+First of all, let's plot the required dataset, in order to obtain information of its support, and shape. In this histogram, it can be seen that there is one main mode around 15, and another local maximum around 40, which means that there may be two clusters of those problematic smartphones, non defective and defective respectively.
 
 ```{r}
+# Plotting the histogram of working temperatures of problematic smartphones
 hist(temps7$x, main = "Histogram of working temperatures of problematic smartphones", xlab = "Temperature")
 ```
 
+
+- a. Implement $\hat{\eta}(x; h) = \frac{h^2 \operatorname{D} \hat{f}(x;h)}{\hat{f}(x;h)}$ as an R function, named eta_hat, that takes as arguments a scalar x, a bandwidth h, and the vector data. It must return the estimated scaled gradient at the point x.
+
+
+The idea for eta_hat is to estimate the kde and obtain its gradient using numDeriv::grad so that we can calculate $\hat{\eta}(x;h)=\frac{h^2 \operatorname{D} \hat{f}(x;h)}{\hat{f}(x;h)}$.
 ```{r}
 # Function that computes the scaled gradient at a given point
 # @params x evaluation point
 # @params h bandwidth
 # @params data vector of data points
-# @returns the value of the gradient at x
+# @returns the value of the scaled gradient at x
 eta_hat = function(x, h, data){
-  #estimate kde and use numderiv::gradient
+  
+  # Idea: estimate kde and obtain its gradient using numDeriv::grad
+  # as numDeriv::grad takes as arguments another function, declare this function
+  
+  # Function that estimates the kde of the data at point x
+  # @params x evaluation point
+  # @returns the value of the kde at x
   fhatsolve=function(x){
     return(ks::kde(x = data, h = h, eval.points = x)$estimate)
   }
+  
+  # Use fhatsolve to obtain the value of the gradient in each x point  
+  gradient = numDeriv::grad(func = fhatsolve, x = x)
+  
+  # kde of data using as bw the h argument
   fhat = fhatsolve(x)
-  gradiente = numDeriv::grad(func = fhatsolve, x = x)
-  return(h^2*gradiente/fhat)
+  
+  # Returning the value of the scaled gradient
+  return(h^2*gradient/fhat)
 }
 ```
 
 - b. The eta_hat function is slow to compute. In order to speed it, you want to define a suitable interpolating function eta_hat_spline obtained by calling splinefun. Figure out the details and check graphically that eta_hat and eta_hat_spline are equivalent.
 
+The main idea is to estimate only once the spline function so that we can interpolate at any given point in the future. So the eta_hat_spline will receive as arguments the point $x$ where we want to calculate it and the previously determined interpolated spline function.
+
+This way, we first use the eta_hat function to calculate the value of the scale gradient in a reduced set of points because this function is very slow and then use each pair of evaluation points and gradient to fit the spline. Afterwards, one can then use the fitted spline to evaluate in any point, which will be faster if the number of evaluation points is very big, keeping in mind we only calculated eta_hat in a reduced grid.
+
 ```{r}
-eta_hat_spline=function(x){
-  interpolated_spline(x=x)
+# Function that estimates the scaled gradient at given point using the interpolated spline 
+# @params x evaluation points
+# @params interpolated_spline fitted spline function
+# @returns the value of the scaled gradient at x using interpolated spline
+eta_hat_spline=function(x, interpolated_spline){
+  # Use of the function interpolated_spline
+  # interpolated_spline must be declare previously  using splinefun 
+  return(interpolated_spline(x = x))
 }
 ```
 
-In order to check graphically that eta_hat and eta_hat_spline are equivalent, we will... 
+In order to check graphically that eta_hat and eta_hat_spline are equivalent, we will first fit the spline in a reduced set of points and then evaluate both eta_hat and the fitted spline a bigger grid and compare the results. It can be seen in the following figure that eta_hat spline reproduces correctly the shape of eta hat except in wild regions in which there are big, fast changes. Also, it should be remembered that eta hat and thus the spline have trouble in low density regions of the data due to the kde having this problem.
 
 ```{r}
-### Comparison between eta_hat and eta_hat_spline
-## eta_hat_spline estimation:
+### Comparison between eta_hat and eta_hat_spline functions
 
-# first, we compute the eta_hat values
+## eta_hat_spline estimation
+
+# Initialization of the evaluation points for the fit of the spline
 xvalues = seq(0,60, by = 1)
+
+# Evaluation of those points using eta_hat function
 yvalues = eta_hat(xvalues, h = 0.5, data = temps7$x)
 
-# spline function using the last grid of points using the results of eta_hat
+# Fit the spline function using the pairs (xvalues, yvalues)
 interpolated_spline = splinefun(x = xvalues, y = yvalues)
 
-# the other set of points in which perform the interpolation 
-est_grid=seq(0,60, by=0.1)
+# Initialization of the points in which evaluate both the interpolation
+# and the original eta_hat function
+est_grid = seq(0,60, by = 0.1)
 
-# eta_hat_spline interpolationn using last grid
-spline_est = eta_hat_spline(x = est_grid)
+# eta_hat_spline performance: evaluation of the scaled gradient using interpolation
+# this function evaluates the gradient for the set of points est_grid
+# internally uses interpolated_spline 
+spline_est = eta_hat_spline(x = est_grid, interpolated_spline)
 
-## eta_hat using the same grid for comparison purposes
-eta_est = eta_hat(x=est_grid, h=0.5, data=temps7$x)
 
-## visual comparison 
-par(mfrow = c(1,2))
-hist(spline_est)
-hist(eta_est)
+
+## eta_hat estimation
+
+# eta_hat performance: evaluation of the scaled gradient 
+# the same grid of evaluation points as for eta_hat_spline will be used for comparison purposes
+eta_est = eta_hat(x = est_grid, h = 0.5, data = temps7$x)
+
+
+
+## visual comparison
+
+# Comparing the estimated scaled gradients superimposing the 
 par(mfrow = c(1,1))
-plot(x=est_grid, y=eta_est)
-lines(x=est_grid, y=spline_est)
+plot(x = est_grid, y = eta_est)
+lines(x = est_grid, y = spline_est, col = "red")
+legend("bottomright", legend = c("eta_hat", "eta_hat_spline"), 
+       col = c("black", "red"), lty = c(1,1), cex = 0.7)
 ```
 
 - c. Using eta_hat_spline, you construct a new function, called euler, that implements the iterative part on the kernel mean shift algorithm. The function must take as main argument x, the initial point for the iterative algorithm. Consider a loop with N = 500 iterations that is stopped if the new point in the iteration is closer than epsilon = 1e-4 to the previous point. The function must return the final point (a point close to a mode) for which x has converged.
 
+
+The main idea is to make the points in the dataset follow a trajectory guided by the normalized gradient in an iterative procedure
+
+$$
+\left\{\begin{array}{l}
+x_{t+1}=x_{t}+h \mathbf{D} \hat{f}\left(x_{t} ; h\right), \quad t=0, \ldots, N \\
+x_{0}=x
+\end{array}\right.
+$$
+with
+$$
+\boldsymbol{\eta}(x):=\frac{\operatorname{D} f(x)}{f(x)}
+$$
+that can be estimated as
+
+$$
+\boldsymbol{\hat{\eta}}(x):=\frac{\operatorname{D} \hat{f}(x)}{\hat{f}(x)}
+$$
+
+but only estimating it for a reduced grid of points and then interpolating it for all the points of the trajectory with the spline procedure explained previously. This way, they will converge to different modes and we will be able to classify them according to the mode they converge to, with convergence meaning that the absolute difference of $x_{t}$ and $x_{t+1}$ is smaller than a certain tolerance epsilon. The algorithm will run for a total of $N$ iterations to try to find convergence or otherwise return NA.
+
 ```{r}
 #Function that applies the euler method to calculate the trajectory of a given initial point
 # @params x initial point
-# @params bw banwidth for kde
-# @params h euler step size
+# @params h bandwidth
 # @params data vector of data points
 # @params N number of iterations
-# @params epsilon tolerance
-# @params xlim sequence of points for evaluating function eta_hat
+# @params epsilon absolute tolerance
+# @params xgrid sequence of points for evaluating function eta_hat
 # @return the final value to which the inital point x converges (close to a mode)
-euler = function(x, data, bw, h, N, epsilon, xgrid){
+euler = function(x, data, h, N, epsilon, xgrid){
   
   # gradient estimated values using eta_hat function
-  grad_est = eta_hat(xgrid, h = bw, data = data)
+  grad_est = eta_hat(xgrid, h = h, data = data)
+  
   # function for interpolation using as grid (xgrid, grad_est)
   interpolated_spline = splinefun(x = xgrid, y = grad_est)
   
@@ -242,15 +408,14 @@ euler = function(x, data, bw, h, N, epsilon, xgrid){
   phi = numeric(length = (N + 1))
   phi[1] = x
   
-  
   # Euler method
   for (t in 1:N) {
     # Estimated gradient interpolating the point
-    Df = eta_hat_spline(x = phi[t])
+    Df = eta_hat_spline(x = phi[t], interpolated_spline)
     # t iteration of Euler algorithm
     phi[t + 1] = phi[t] + h * Df 
     # Condition for breaking the loop
-    if( (phi[t + 1] - phi[t]) < epsilon) return(phi[t + 1])
+    if( abs(phi[t + 1] - phi[t]) < epsilon) return(phi[t + 1])
   }
   return(NA)
 }
@@ -258,19 +423,28 @@ euler = function(x, data, bw, h, N, epsilon, xgrid){
 
 - d. Apply euler to all the data points in temps-7 with a suitably-chosen bandwidth. Visualize the final points using hist and rug.
 
+In order to apply euler we need to determine what a suitably-chosen bandwidth is. We will use the normal scaled bandwidth formula for arbitrary dimensions and derivative order which is given by
+
+$$
+\mathbf{H}_{\mathrm{NS}, r}=(4 /(p+2 r+2))^{2 /(p+2 r+4)} n^{-2 /(p+2 r+4)} \mathbf{\Sigma}
+$$
+with $p$ being the number of dimensions, 1 in this case. $r$ being the derivative order, $\Sigma$ being the covariance matrix, the variance in the univariate case, and $n$, the number of data points.
+
+We use this formula to determine the suitable bandwidths keeping in mind that the optimal bandwidth for euler is the one optimal for density derivative estimation, that is, $r=1$.
 ```{r}
-# Suitable bandwidth 
-# @params p initial point
-# @params r banwidth for kde
-# @params sigma euler step size
-# @params n vector of data points
-# @return the normal scaled bandwidth 
+# Suitable bandwidth
+# @params p number of dimensions
+# @params r derivative order
+# @params sigma covariance matrix
+# @params n number of data points
+# @return the normal scaled bandwidth matrix (or scalar in univariate case)
 
 suitable_bw = function(p, r, sigma, n) {
   return((4/(p + 2 * r + 2))^(2 / (p + 2 * r + 4)) * n^(- 2 / (p + 2 * r + 4)) * sigma)
 }
 ```
 
+Using the euler function for each of the points in the dataset with this optimal bandwidth we obtain two convergence modes, that we can associate to non defective and defective clusters.
 
 ```{r}
 # x sequence for which obtaining their mode:
@@ -279,17 +453,17 @@ x = temps7$x
 # Initialization of the modes for each point
 mode = numeric(length = length(x))
 
-# Normal scaled bandwidth: Computing a suitable bw for density and derivative estimation
+# Normal scaled bandwidth: Computing a suitable bw for derivative estimation
 p = 1 # number of dimensions 
-r = c(0,1) # derivative order
+r = 1 # derivative order
 n = length(temps7$x) # sample size
 sigma = var(temps7$x) # variance of the data
-bw = suitable_bw(p = p, r = r[1], n = n, sigma = sigma) # bw for density
-H = suitable_bw(p = p, r = r[2], n = n, sigma = sigma) # bw for gradient
+H = suitable_bw(p = p, r = r, n = n, sigma = sigma)  # bw for gradient
 
 # Loop for computing the mode for each point from x
 for(i in 1:length(x)){
-  mode[i] = euler(x[i], data = temps7$x, bw = bw, h = H, N = 500, epsilon = 1e-4, xgrid = seq(6.8,63, by = 1))
+  mode[i] = euler(x[i], data = temps7$x, h = H, N = 500, epsilon = 1e-4,
+                  xgrid = seq(6.8,63, by = 1))
 }
 
 # Plotting the final results using histograms and the sample 
@@ -299,18 +473,26 @@ rug(mode)
 
 - e. On the final points resulting from d, use kmeans with k = 2 to cluster the two main modes that were detected. From there, conclude an estimation of the true proportion of defective smartphones and comment on the claim of S.
 
-
+Using k means we get the following clusters
 
 ```{r}
+# use k means with k=2 clusters on the convergence points of euler
 k = 2
 kms = kmeans(x = na.omit(mode), centers = k)
-kms$centers
 
+# see the center of the cluster (average)
+kms$centers
+```
+
+which represent the two modes obtained with euler, that were already clearly separated. Finally, we can estimate the proportion of defective phones by seeing the proportion of the phones that belong to the high temperature cluster (that is the one that is associated with defects), seeing around a 5\%.
+```{r}
+# associate defect cluster with high temperature
 defect_cluster = which.max(kms$centers)
+
+# calculate the proportion of defective phones
 prop = sum(kms$cluster == defect_cluster)/length(kms$cluster)
 prop
 ```
-
 
 
 
